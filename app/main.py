@@ -1,5 +1,12 @@
+import io
+import matplotlib
+# Use non-interactive 'Agg' backend suitable for server environments
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
 app = FastAPI(
@@ -170,6 +177,59 @@ def root():
 def analyze(request: BeamAnalysisRequest):
     try:
         return calculate_beam(request)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@app.post(
+    "/analyze/plot",
+    response_class=Response,
+    status_code=status.HTTP_200_OK,
+    summary="Generate SFD and BMD Plots as PNG Image"
+)
+def analyze_and_plot(request: BeamAnalysisRequest):
+    try:
+        # 1. Run the calculations
+        res = calculate_beam(request)
+
+        # 2. Setup matplotlib subplots (2 rows: SFD on top, BMD on bottom)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+        fig.suptitle(f"Beam Analysis Diagrams (Span = {res.span}m)", fontsize=14, fontweight='bold')
+
+        # --- Plot Shear Force Diagram (SFD) ---
+        ax1.plot(res.x_coords, res.shear_force, color='#1f77b4', linewidth=2)
+        ax1.fill_between(res.x_coords, res.shear_force, color='#1f77b4', alpha=0.25)
+        ax1.axhline(0, color='black', linewidth=0.8, linestyle='--')
+        ax1.set_ylabel("Shear Force (kN)", fontweight='bold')
+        ax1.set_title(f"Max Shear Force: {res.critical_values.max_shear_force} kN", fontsize=10)
+        ax1.grid(True, linestyle=':', alpha=0.6)
+
+        # --- Plot Bending Moment Diagram (BMD) ---
+        ax2.plot(res.x_coords, res.bending_moment, color='#d62728', linewidth=2)
+        ax2.fill_between(res.x_coords, res.bending_moment, color='#d62728', alpha=0.25)
+        ax2.axhline(0, color='black', linewidth=0.8, linestyle='--')
+        ax2.set_xlabel("Span Position x (m)", fontweight='bold')
+        ax2.set_ylabel("Bending Moment (kNm)", fontweight='bold')
+        ax2.set_title(
+            f"Max Bending Moment: {res.critical_values.max_bending_moment} kNm at x = {res.critical_values.x_max_moment}m", 
+            fontsize=10
+        )
+        ax2.grid(True, linestyle=':', alpha=0.6)
+
+        plt.tight_layout()
+
+        # 3. Save plot image to memory buffer as PNG
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', dpi=150)
+        plt.close(fig)
+        buffer.seek(0)
+
+        # 4. Return PNG image response
+        return Response(content=buffer.getvalue(), media_type="image/png")
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
