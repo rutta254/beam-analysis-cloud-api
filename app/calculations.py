@@ -9,6 +9,7 @@ from app.schemas import (
     BeamAnalysisResponse,
     ReactionForces,
     CriticalValues,
+    VaryingLoad,
 )
 
 
@@ -16,7 +17,7 @@ def calculate_beam(req: BeamAnalysisRequest) -> BeamAnalysisResponse:
     L = req.length
     
     # -------------------------------------------------------------
-    # 0. SAFELY EXTRACT SUPPORTS & LOADS (handles missing schema attributes)
+    # 0. SAFELY EXTRACT SUPPORTS & LOADS
     # -------------------------------------------------------------
     supports = getattr(req, 'supports', None)
     if supports:
@@ -38,15 +39,15 @@ def calculate_beam(req: BeamAnalysisRequest) -> BeamAnalysisResponse:
     varying_loads = list(getattr(req, 'varying_loads', []) or [])
     udls = getattr(req, 'udls', []) or []
 
-    # Convert simple UDLs from frontend into uniform VaryingLoads (w1 = w2)
+    # Clean Pydantic instantiation for simple UDLs from frontend
     for u in udls:
         varying_loads.append(
-            type("VaryingLoad", (), {
-                "w1": u.magnitude,
-                "w2": u.magnitude,
-                "start": u.start,
-                "end": u.end
-            })()
+            VaryingLoad(
+                w1=u.magnitude,
+                w2=u.magnitude,
+                start=u.start,
+                end=u.end
+            )
         )
 
     # -------------------------------------------------------------

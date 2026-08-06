@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beam Analysis Cloud Tool</title>
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- html2canvas for DOM rendering -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <!-- jsPDF for PDF document compilation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-6">
+  <div class="max-w-6xl mx-auto">
+    <!-- Header -->
+    <header class="mb-8 border-b border-slate-700 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div>
+        <h1 class="text-3xl font-bold text-blue-400">🏗️ Structural Beam Analyzer</h1>
+        <p class="text-slate-400 text-sm mt-1">Powered by FastAPI & Matplotlib</p>
+      </div>
+      <!-- Export PDF Button -->
+      <button type="button" id="exportPdfBtn" onclick="generatePdfReport()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-4 py-2.5 rounded-lg border border-slate-700 transition flex items-center space-x-2">
+        <svg class="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+        </svg>
+        <span id="exportBtnText">Export PDF Report</span>
+      </button>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      
+      <!-- Input Panel -->
+      <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 h-fit">
+        <h2 class="text-xl font-semibold mb-4 text-white">Beam Parameters</h2>
+        <form id="beamForm" class="space-y-4">
+          
+          <div>
+            <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Total Span (m)</label>
+            <input type="number" id="length" step="0.1" value="10.0" min="0.1" required class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-blue-500">
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Support A (m)</label>
+              <input type="number" id="supA" step="0.1" value="2.0" min="0" required class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold uppercase text-slate-400 mb-1">Support B (m)</label>
+              <input type="number" id="supB" step="0.1" value="8.0" min="0" required class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-blue-500">
+            </div>
+          </div>
+
+          <!-- Dynamic Point Loads Section -->
+          <div class="border-t border-slate-700 pt-4">
+            <div class="flex justify-between items-center mb-2">
+              <h3 class="text-sm font-semibold text-slate-300">Point Loads</h3>
+              <button type="button" id="addPointLoadBtn" class="text-xs bg-slate-700 hover:bg-slate-600 text-blue-400 font-semibold px-2 py-1 rounded border border-slate-600 transition">
+                + Add Load
+              </button>
+            </div>
+            <div id="pointLoadsContainer" class="space-y-2">
+              <!-- Point load rows inserted via JS -->
+            </div>
+          </div>
+
+          <!-- Dynamic UDLs Section -->
+          <div class="border-t border-slate-700 pt-4">
+            <div class="flex justify-between items-center mb-2">
+              <h3 class="text-sm font-semibold text-slate-300">Uniformly Distributed Loads (UDL)</h3>
+              <button type="button" id="addUdlBtn" class="text-xs bg-slate-700 hover:bg-slate-600 text-emerald-400 font-semibold px-2 py-1 rounded border border-slate-600 transition">
+                + Add UDL
+              </button>
+            </div>
+            <div id="udlsContainer" class="space-y-2">
+              <!-- UDL rows inserted via JS -->
+            </div>
+          </div>
+
+          <!-- Section Rigidity Section -->
+          <div class="border-t border-slate-700 pt-4">
+            <h3 class="text-sm font-semibold text-slate-300 mb-2">Section Rigidity (Deflection)</h3>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs text-slate-400 mb-1">E (kPa)</label>
+                <input type="number" id="eVal" step="1000" value="210000000" required class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-blue-500">
+              </div>
+              <div>
+                <label class="block text-xs text-slate-400 mb-1">I (m⁴)</label>
+                <input type="number" id="iVal" step="0.00001" value="0.0003" required class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white focus:outline-none focus:border-blue-500">
+              </div>
+            </div>
+          </div>
+
+          <!-- Submit Button with Spinner -->
+          <button type="submit" id="submitBtn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded transition flex items-center justify-center space-x-2">
+            <svg id="submitSpinner" class="hidden animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span id="submitBtnText">Analyze & Generate Diagrams</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Results & Diagram Panel -->
+      <div class="lg:col-span-2 space-y-6">
+        
+        <!-- Dismissible Inline Error Alert -->
+        <div id="errorAlert" class="hidden bg-rose-950/80 border border-rose-500/50 text-rose-200 px-4 py-3 rounded-xl flex justify-between items-start space-x-3 transition-all">
+          <div class="flex items-start space-x-3">
+            <span class="text-xl">⚠️</span>
+            <div>
+              <h4 class="font-semibold text-sm">Analysis Request Failed</h4>
+              <p id="errorMessage" class="text-xs text-rose-300/90 mt-0.5">An unexpected error occurred.</p>
+            </div>
+          </div>
+          <button type="button" onclick="hideErrorAlert()" class="text-rose-400 hover:text-rose-200 font-bold text-sm px-1">✕</button>
+        </div>
+
+        <!-- Key Metrics Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+            <p class="text-xs text-slate-400">Reaction R_A</p>
+            <p id="resRA" class="text-lg font-bold text-blue-400">-- kN</p>
+          </div>
+          <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+            <p class="text-xs text-slate-400">Reaction R_B</p>
+            <p id="resRB" class="text-lg font-bold text-blue-400">-- kN</p>
+          </div>
+          <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+            <p class="text-xs text-slate-400">Max Moment</p>
+            <p id="resMaxM" class="text-lg font-bold text-rose-400">-- kNm</p>
+          </div>
+          <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+            <p class="text-xs text-slate-400">Max Deflection</p>
+            <p id="resMaxDef" class="text-lg font-bold text-emerald-400">-- mm</p>
+          </div>
+        </div>
+
+        <!-- Plot Display Container -->
+        <div id="plotContainer" class="bg-slate-800 p-6 rounded-xl border border-slate-700 text-center min-h-[400px] flex items-center justify-center relative">
+          <div id="placeholderText" class="text-slate-500">
+            Configure parameters and click <strong>Analyze</strong> to render SFD/BMD diagrams.
+          </div>
+          <img id="plotImage" class="hidden w-full h-auto rounded-lg shadow-lg border border-slate-700" alt="Beam SFD and BMD Plot">
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE_URL = "https://beam-analysis-cloud-api.onrender.com";
+    let activeObjectUrl = null;
+
+    const pointLoadsContainer = document.getElementById("pointLoadsContainer");
+    const udlsContainer = document.getElementById("udlsContainer");
+
+    // --- Dynamic Row Builders ---
+    function addPointLoadRow(magnitude = 25.0, position = 1.0) {
+      const row = document.createElement("div");
+      row.className = "flex items-center space-x-2 point-load-row";
+      row.innerHTML = `
+        <div class="w-1/2">
+          <input type="number" step="0.1" value="${magnitude}" placeholder="Mag (kN)" required 
+            class="pl-mag w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-blue-500">
+        </div>
+        <div class="w-1/2">
+          <input type="number" step="0.1" value="${position}" placeholder="Pos (m)" min="0" required 
+            class="pl-pos w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-blue-500">
+        </div>
+        <button type="button" onclick="this.parentElement.remove()" class="text-rose-400 hover:text-rose-300 font-bold px-2 py-1">
+          ✕
+        </button>
+      `;
+      pointLoadsContainer.appendChild(row);
+    }
+
+    function addUdlRow(magnitude = 10.0, start = 2.0, end = 8.0) {
+      const row = document.createElement("div");
+      row.className = "flex items-center space-x-2 udl-row";
+      row.innerHTML = `
+        <div class="w-1/3">
+          <input type="number" step="0.1" value="${magnitude}" placeholder="w (kN/m)" required 
+            class="udl-mag w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <div class="w-1/3">
+          <input type="number" step="0.1" value="${start}" placeholder="Start (m)" min="0" required 
+            class="udl-start w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <div class="w-1/3">
+          <input type="number" step="0.1" value="${end}" placeholder="End (m)" min="0" required 
+            class="udl-end w-full bg-slate-900 border border-slate-700 rounded p-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+        </div>
+        <button type="button" onclick="this.parentElement.remove()" class="text-rose-400 hover:text-rose-300 font-bold px-2 py-1">
+          ✕
+        </button>
+      `;
+      udlsContainer.appendChild(row);
+    }
+
+    // Attach button listeners
+    document.getElementById("addPointLoadBtn").addEventListener("click", () => addPointLoadRow());
+    document.getElementById("addUdlBtn").addEventListener("click", () => addUdlRow());
+
+    // Initialize default load inputs
+    addPointLoadRow(25.0, 1.0);
+    addUdlRow(10.0, 2.0, 8.0);
+
+    // --- Array Extraction Helper ---
+    function getLoadsFromUI() {
+      const point_loads = Array.from(document.querySelectorAll(".point-load-row")).map(row => ({
+        magnitude: parseFloat(row.querySelector(".pl-mag").value),
+        position: parseFloat(row.querySelector(".pl-pos").value)
+      }));
+
+      const udls = Array.from(document.querySelectorAll(".udl-row")).map(row => ({
+        magnitude: parseFloat(row.querySelector(".udl-mag").value),
+        start: parseFloat(row.querySelector(".udl-start").value),
+        end: parseFloat(row.querySelector(".udl-end").value)
+      }));
+
+      return { point_loads, udls };
+    }
+
+    // --- Alert Controllers ---
+    function showErrorAlert(message) {
+      const alertBox = document.getElementById("errorAlert");
+      const msgElement = document.getElementById("errorMessage");
+      msgElement.innerText = message;
+      alertBox.classList.remove("hidden");
+      alertBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function hideErrorAlert() {
+      document.getElementById("errorAlert").classList.add("hidden");
+    }
+
+    // --- Loading State Controller ---
+    function setLoading(isLoading) {
+      const submitBtn = document.getElementById("submitBtn");
+      const submitSpinner = document.getElementById("submitSpinner");
+      const submitBtnText = document.getElementById("submitBtnText");
+
+      if (isLoading) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add("opacity-75", "cursor-not-allowed");
+        submitSpinner.classList.remove("hidden");
+        submitBtnText.innerText = "Analyzing Beam...";
+      } else {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove("opacity-75", "cursor-not-allowed");
+        submitSpinner.classList.add("hidden");
+        submitBtnText.innerText = "Analyze & Generate Diagrams";
+      }
+    }
+
+    // --- Form Submit Handler ---
+    document.getElementById("beamForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      
+      hideErrorAlert();
+
+      const length = parseFloat(document.getElementById("length").value);
+      const supA = parseFloat(document.getElementById("supA").value);
+      const supB = parseFloat(document.getElementById("supB").value);
+      const { point_loads, udls } = getLoadsFromUI();
+
+      // Spatial boundary & domain validation
+      if (supA >= supB || supB > length) {
+        showErrorAlert("Invalid support configuration: Ensure Support A < Support B and both sit within total length.");
+        return;
+      }
+
+      for (const pl of point_loads) {
+        if (pl.position < 0 || pl.position > length) {
+          showErrorAlert(`Point load at ${pl.position}m falls outside total beam length (${length}m).`);
+          return;
+        }
+      }
+
+      for (const udl of udls) {
+        if (udl.start >= udl.end) {
+          showErrorAlert(`UDL start position (${udl.start}m) must be strictly less than end position (${udl.end}m).`);
+          return;
+        }
+        if (udl.start < 0 || udl.end > length) {
+          showErrorAlert(`UDL span (${udl.start}m – ${udl.end}m) exceeds total beam length (${length}m).`);
+          return;
+        }
+      }
+
+      setLoading(true);
+
+      const payload = {
+        length: length,
+        supports: {
+          support_a: supA,
+          support_b: supB
+        },
+        E: parseFloat(document.getElementById("eVal").value),
+        I: parseFloat(document.getElementById("iVal").value),
+        point_loads: point_loads,
+        udls: udls,
+        num_points: 200
+      };
+
+      try {
+        // 1. Fetch JSON Numerical Results
+        const jsonRes = await fetch(`${API_BASE_URL}/api/v1/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        
+        if (!jsonRes.ok) {
+          const errPayload = await jsonRes.json().catch(() => ({}));
+          throw new Error(errPayload.detail || `Backend server returned status HTTP ${jsonRes.status}`);
+        }
+        
+        const data = await jsonRes.json();
+
+        // 2. Fetch Matplotlib Plot PNG
+        const imgRes = await fetch(`${API_BASE_URL}/api/v1/analyze/plot`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!imgRes.ok) {
+          throw new Error(`Diagram rendering failed with status HTTP ${imgRes.status}`);
+        }
+
+        const imageBlob = await imgRes.blob();
+
+        // Update Key Metrics Cards
+        document.getElementById("resRA").innerText = `${data.reactions.R_A.toFixed(2)} kN`;
+        document.getElementById("resRB").innerText = `${data.reactions.R_B.toFixed(2)} kN`;
+        document.getElementById("resMaxM").innerText = `${data.critical_values.max_bending_moment.toFixed(2)} kNm`;
+        document.getElementById("resMaxDef").innerText = `${data.critical_values.max_deflection_mm.toFixed(3)} mm`;
+
+        // Update plot image & revoke previous blob URL
+        if (activeObjectUrl) {
+          URL.revokeObjectURL(activeObjectUrl);
+        }
+        activeObjectUrl = URL.createObjectURL(imageBlob);
+
+        document.getElementById("placeholderText").classList.add("hidden");
+        const plotImg = document.getElementById("plotImage");
+        plotImg.src = activeObjectUrl;
+        plotImg.classList.remove("hidden");
+
+      } catch (err) {
+        showErrorAlert(err.message);
+        console.error("Beam Analysis Execution Error:", err);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    // --- Client-Side PDF Generation Handler ---
+    async function generatePdfReport() {
+      const plotImg = document.getElementById("plotImage");
+      
+      if (plotImg.classList.contains("hidden")) {
+        showErrorAlert("Please run the beam analysis before exporting a PDF report.");
+        return;
+      }
+
+      const exportBtn = document.getElementById("exportPdfBtn");
+      const exportText = document.getElementById("exportBtnText");
+      const originalText = exportText.innerText;
+      
+      exportText.innerText = "Generating PDF...";
+      exportBtn.disabled = true;
+
+      try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({
+          orientation: "p",
+          unit: "mm",
+          format: "a4"
+        });
+
+        // --- PDF Title Block / Header ---
+        doc.setFillColor(15, 23, 42); // slate-900 background
+        doc.rect(0, 0, 210, 28, "F");
+
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(16);
+        doc.text("STRUCTURAL BEAM ANALYSIS REPORT", 14, 15);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(148, 163, 184); // slate-400
+        const dateStr = new Date().toLocaleDateString("en-GB", { year: 'numeric', month: 'short', day: 'numeric' });
+        doc.text(`Generated: ${dateStr}`, 14, 22);
+
+        // --- 1. Input Parameters Section ---
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(30, 41, 59); // slate-800
+        doc.text("1. Design Inputs & Geometry", 14, 38);
+
+        const length = document.getElementById("length").value;
+        const supA = document.getElementById("supA").value;
+        const supB = document.getElementById("supB").value;
+        const eVal = document.getElementById("eVal").value;
+        const iVal = document.getElementById("iVal").value;
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9.5);
+        doc.text(`Total Span (L): ${length} m`, 16, 46);
+        doc.text(`Support Positions: A = ${supA} m | B = ${supB} m`, 16, 52);
+        doc.text(`Modulus of Elasticity (E): ${Number(eVal).toExponential(2)} kPa`, 16, 58);
+        doc.text(`Moment of Inertia (I): ${iVal} m⁴`, 16, 64);
+
+        // --- 2. Calculated Reactions & Critical Values ---
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text("2. Critical Analysis Results", 14, 76);
+
+        const rA = document.getElementById("resRA").innerText;
+        const rB = document.getElementById("resRB").innerText;
+        const maxM = document.getElementById("resMaxM").innerText;
+        const maxDef = document.getElementById("resMaxDef").innerText;
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9.5);
+        doc.text(`Support Reaction R_A: ${rA}`, 16, 84);
+        doc.text(`Support Reaction R_B: ${rB}`, 16, 90);
+        doc.text(`Max Bending Moment: ${maxM}`, 16, 96);
+        doc.text(`Max Deflection: ${maxDef}`, 16, 102);
+
+        // --- 3. Diagram Section (html2canvas) ---
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.text("3. Shear Force & Bending Moment Diagrams", 14, 114);
+
+        const plotContainer = document.getElementById("plotContainer");
+        const canvas = await html2canvas(plotContainer, {
+          scale: 2,
+          backgroundColor: "#1e293b" // slate-800
+        });
+
+        const imgData = canvas.toDataURL("image/png");
+        const imgWidth = 182; // A4 width minus margins (210 - 28)
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+        doc.addImage(imgData, "PNG", 14, 120, imgWidth, imgHeight);
+
+        // --- Footer ---
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text("Structural Beam Analyzer — Client-Side Calculation Sheet", 14, 285);
+
+        // Download document
+        doc.save(`beam-analysis-report-${Date.now()}.pdf`);
+
+      } catch (err) {
+        showErrorAlert("Failed to generate PDF report: " + err.message);
+        console.error("PDF Export Error:", err);
+      } finally {
+        exportText.innerText = originalText;
+        exportBtn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
