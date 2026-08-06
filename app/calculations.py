@@ -15,13 +15,39 @@ from app.schemas import (
 def calculate_beam(req: BeamAnalysisRequest) -> BeamAnalysisResponse:
     L = req.length
     
-    # Set default supports to ends if not specified
-    sup_a = req.supports.support_a if req.supports else 0.0
-    sup_b = req.supports.support_b if req.supports else L
+    # -------------------------------------------------------------
+    # 0. SAFELY EXTRACT SUPPORTS & LOADS (handles missing schema attributes)
+    # -------------------------------------------------------------
+    supports = getattr(req, 'supports', None)
+    if supports:
+        sup_a = getattr(supports, 'support_a', 0.0)
+        sup_b = getattr(supports, 'support_b', L)
+    else:
+        sup_a = 0.0
+        sup_b = L
+
     span_ab = sup_b - sup_a
 
+    if span_ab <= 0:
+        raise ValueError("Support B position must be strictly greater than Support A position.")
     if sup_b > L:
         raise ValueError(f"Support B position ({sup_b}m) cannot exceed total beam length ({L}m).")
+
+    point_loads = getattr(req, 'point_loads', []) or []
+    point_moments = getattr(req, 'point_moments', []) or []
+    varying_loads = list(getattr(req, 'varying_loads', []) or [])
+    udls = getattr(req, 'udls', []) or []
+
+    # Convert simple UDLs from frontend into uniform VaryingLoads (w1 = w2)
+    for u in udls:
+        varying_loads.append(
+            type("VaryingLoad", (), {
+                "w1": u.magnitude,
+                "w2": u.magnitude,
+                "start": u.start,
+                "end": u.end
+            })()
+        )
 
     # -------------------------------------------------------------
     # 1. EQUILIBRIUM: Sum of Moments about Support A = 0
@@ -30,17 +56,19 @@ def calculate_beam(req: BeamAnalysisRequest) -> BeamAnalysisResponse:
     total_vertical_load = 0.0
 
     # Point loads
-    for p in req.point_loads:
+    for p in point_loads:
         total_moment_A += p.magnitude * (p.position - sup_a)
         total_vertical_load += p.magnitude
 
     # Point moments (Clockwise positive)
-    for m in req.point_moments:
+    for m in point_moments:
         total_moment_A += m.magnitude
 
-    # Varying loads (Trapezoidal / Uniform / Triangular)
-    for v in req.varying_loads:
+    # Varying & Uniform loads
+    for v in varying_loads:
         w_len = v.end - v.start
+        if w_len <= 0:
+            continue
         w_total = 0.5 * (v.w1 + v.w2) * w_len
         
         # Centroid distance from start of load
@@ -53,16 +81,15 @@ def calculate_beam(req: BeamAnalysisRequest) -> BeamAnalysisResponse:
         total_moment_A += w_total * (x_centroid - sup_a)
         total_vertical_load += w_total
 
-    # Reaction forces
+    # Reactions
     R_B = total_moment_A / span_ab
     R_A = total_vertical_load - R_B
 
     # -------------------------------------------------------------
     # 2. INTERNAL FORCES (SFD & BMD)
     # -------------------------------------------------------------
-    x_coords = np.linspace(0, L, req.num_points)
-    dx = x_coords[1] - x_coords[0]
-
+    num_points = getattr(req, 'num_points', 200)
+    x_coords = np.linspace(0, L, num_points)
     shear_force = []
     bending_moment = []
 
@@ -79,66 +106,68 @@ def calculate_beam(req: BeamAnalysisRequest) -> BeamAnalysisResponse:
             M += R_B * (x - sup_b)
 
         # Point loads
-        for p in req.point_loads:
+        for p in point_loads:
             if x > p.position:
                 V -= p.magnitude
                 M -= p.magnitude * (x - p.position)
 
         # Point moments
-        for m in req.point_moments:
+        for m in point_moments:
             if x >= m.position:
                 M -= m.magnitude
 
-        # Varying loads
-        for v in req.varying_loads:
+        # Varying & Uniform loads
+        for v in varying_loads:
             if x > v.start:
                 eff_end = min(x, v.end)
                 covered_len = eff_end - v.start
+                tot_len = v.end - v.start
                 
-                # Load intensity at current x cutoff
-                w_x = v.w1 + (v.w2 - v.w1) * ((eff_end - v.start) / (v.end - v.start))
-                
-                # Area of trapezoid up to x
-                w_seg = 0.5 * (v.w1 + w_x) * covered_len
-                
-                # Centroid of segment up to x
-                if (v.w1 + w_x) > 0:
-                    c_seg = (covered_len / 3.0) * ((v.w1 + 2 * w_x) / (v.w1 + w_x))
-                else:
-                    c_seg = covered_len / 2.0
+                if tot_len > 0:
+                    w_x = v.w1 + (v.w2 - v.w1) * (covered_len / tot_len)
+                    w_seg = 0.5 * (v.w1 + w_x) * covered_len
+                    
+                    if (v.w1 + w_x) > 0:
+                        c_seg = (covered_len / 3.0) * ((v.w1 + 2 * w_x) / (v.w1 + w_x))
+                    else:
+                        c_seg = covered_len / 2.0
 
-                V -= w_seg
-                M -= w_seg * (x - (v.start + c_seg))
+                    V -= w_seg
+                    M -= w_seg * (x - (v.start + c_seg))
 
         shear_force.append(V)
         bending_moment.append(M)
 
     # -------------------------------------------------------------
-    # 3. DEFLECTION CALCULATION (Double Integration of M / EI)
+    # 3. DEFLECTION (Double Trapezoidal Integration of -M / EI)
     # -------------------------------------------------------------
-    EI = req.E * req.I  # Flexural rigidity in kN*m^2
+    E = getattr(req, 'E', 210e6)
+    I = getattr(req, 'I', 0.0001)
+    EI = E * I  # Flexural rigidity in kN*m^2
     M_arr = np.array(bending_moment)
 
-    # First integration: Slope theta(x) uncorrected for C1
-    theta_raw = np.cumsum(M_arr / EI) * dx
+    curv = -M_arr / EI
 
-    # Second integration: Deflection v(x) uncorrected for C1 and C2
-    v_raw = np.cumsum(theta_raw) * dx
+    theta_raw = np.zeros_like(x_coords)
+    v_raw = np.zeros_like(x_coords)
+    
+    for idx in range(1, len(x_coords)):
+        dx = x_coords[idx] - x_coords[idx-1]
+        theta_raw[idx] = theta_raw[idx-1] + 0.5 * (curv[idx-1] + curv[idx]) * dx
+        v_raw[idx] = v_raw[idx-1] + 0.5 * (theta_raw[idx-1] + theta_raw[idx]) * dx
 
-    # Fit linear boundary constants (C1*x + C2) to enforce v(sup_a) = 0 and v(sup_b) = 0
+    # Enforce boundary conditions: v(sup_a) = 0 and v(sup_b) = 0
     idx_a = (np.abs(x_coords - sup_a)).argmin()
     idx_b = (np.abs(x_coords - sup_b)).argmin()
 
     x_a, v_a = x_coords[idx_a], v_raw[idx_a]
     x_b, v_b = x_coords[idx_b], v_raw[idx_b]
 
-    # Solving linear system: C1 * x + C2 = -v_raw
     slope_C1 = -(v_b - v_a) / (x_b - x_a) if x_b != x_a else 0.0
     intercept_C2 = -v_a - slope_C1 * x_a
 
-    # Elastic curve (deflection in meters, converted to mm)
     deflection_m = v_raw + (slope_C1 * x_coords + intercept_C2)
-    deflection_mm = deflection_m * 1000.0  # mm
+    deflection_mm = deflection_m * 1000.0
 
     # -------------------------------------------------------------
     # 4. CRITICAL VALUES
@@ -172,7 +201,7 @@ def generate_sfd_bmd_plot(res: BeamAnalysisResponse) -> bytes:
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
     fig.suptitle(f"Advanced Beam Analysis (Span = {res.span}m)", fontsize=13, fontweight='bold')
 
-    # --- Shear Force Diagram (SFD) ---
+    # --- SFD ---
     ax1.plot(res.x_coords, res.shear_force, color='#1f77b4', linewidth=2)
     ax1.fill_between(res.x_coords, res.shear_force, color='#1f77b4', alpha=0.2)
     ax1.axhline(0, color='black', linewidth=0.8, linestyle='--')
@@ -180,7 +209,7 @@ def generate_sfd_bmd_plot(res: BeamAnalysisResponse) -> bytes:
     ax1.set_title(f"Max Shear: {res.critical_values.max_shear_force} kN", fontsize=9)
     ax1.grid(True, linestyle=':', alpha=0.6)
 
-    # --- Bending Moment Diagram (BMD) ---
+    # --- BMD ---
     ax2.plot(res.x_coords, res.bending_moment, color='#d62728', linewidth=2)
     ax2.fill_between(res.x_coords, res.bending_moment, color='#d62728', alpha=0.2)
     ax2.axhline(0, color='black', linewidth=0.8, linestyle='--')
@@ -191,7 +220,7 @@ def generate_sfd_bmd_plot(res: BeamAnalysisResponse) -> bytes:
     )
     ax2.grid(True, linestyle=':', alpha=0.6)
 
-    # --- Elastic Deflection Curve ---
+    # --- Deflection Curve ---
     ax3.plot(res.x_coords, res.deflection_mm, color='#2ca02c', linewidth=2)
     ax3.fill_between(res.x_coords, res.deflection_mm, color='#2ca02c', alpha=0.2)
     ax3.axhline(0, color='black', linewidth=0.8, linestyle='--')
