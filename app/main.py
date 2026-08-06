@@ -1,5 +1,8 @@
+import os
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.schemas import BeamAnalysisRequest, BeamAnalysisResponse
 from app.calculations import calculate_beam, generate_sfd_bmd_plot
@@ -14,28 +17,44 @@ app = FastAPI(
 # CORS Middleware Configuration
 # -------------------------------------------------------------
 origins = [
-    "http://localhost:3000",       # React / Next.js local dev
-    "http://localhost:5173",       # Vite local dev
+    "http://localhost:3000",
+    "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://your-frontend-domain.vercel.app",  # Production frontend (replace with actual domain)
-    "*"                            # Allow all origins (useful during early testing)
+    "*"
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,             # Origins allowed to send requests
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],               # Allow all HTTP methods (GET, POST, OPTIONS, etc.)
-    allow_headers=["*"],               # Allow all headers (Content-Type, Authorization, etc.)
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # -------------------------------------------------------------
-# Endpoints
+# Static Files & UI Serving
 # -------------------------------------------------------------
-@app.get("/")
+# Resolves path to app/frontend regardless of working directory
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+
+if os.path.exists(FRONTEND_DIR):
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+@app.get("/", response_class=FileResponse)
 def read_root():
+    index_path = os.path.join(FRONTEND_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"status": "healthy", "service": "Beam Analysis Cloud API", "note": "index.html not found in app/frontend"}
+
+@app.get("/health")
+def health_check():
     return {"status": "healthy", "service": "Beam Analysis Cloud API"}
 
+# -------------------------------------------------------------
+# API Endpoints
+# -------------------------------------------------------------
 @app.post("/api/v1/analyze", response_model=BeamAnalysisResponse)
 def analyze_beam_endpoint(payload: BeamAnalysisRequest):
     try:
