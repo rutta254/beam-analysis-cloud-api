@@ -1,4 +1,3 @@
-name: FastAPI Continuous Integration
 name: CI Pipeline
 
 on:
@@ -12,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Check out repository
+    - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Set up Python
@@ -26,7 +25,6 @@ jobs:
         pip install -r requirements.txt
 
     - name: Run unit tests with pytest
+      run: pytest
       env:
         PYTHONPATH: .
-      run: |
-        pytest
