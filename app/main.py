@@ -16,28 +16,14 @@ app = FastAPI(
 )
 
 # -------------------------------------------------------------
-# 1. Strict CORS Middleware Configuration
+# 1. Flexible CORS Middleware Configuration
 # -------------------------------------------------------------
-# Replace or add your custom production frontend domains here
-ALLOWED_ORIGINS = [
-    "https://beam-analysis-cloud-api.onrender.com",  # Self/Render domain
-    "http://localhost:3000",                          # React/Next local dev
-    "http://localhost:5173",                          # Vite local dev
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:8000",
-]
-
-# Pull additional allowed domain from environment variables if set
-EXTRA_ORIGIN = os.getenv("ALLOWED_FRONTEND_ORIGIN")
-if EXTRA_ORIGIN:
-    ALLOWED_ORIGINS.append(EXTRA_ORIGIN)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],  # Allows Vercel, rutta.com, localhost, and any frontend client
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    allow_methods=["*"],  # Allows GET, POST, OPTIONS, etc.
+    allow_headers=["*"],  # Allows all incoming headers
 )
 
 # -------------------------------------------------------------
@@ -56,7 +42,7 @@ def read_root():
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return JSONResponse(
-        status_code=status.HTTP_444_RESPONSE_HAS_NO_BODY,
+        status_code=status.HTTP_404_NOT_FOUND,
         content={"error": "Frontend entry point (index.html) not found in app/frontend."}
     )
 
@@ -70,7 +56,7 @@ def read_root():
     tags=["System"]
 )
 def health_check():
-    """Endpoint for Render or external uptime monitors (e.g., UptimeRobot)."""
+    """Endpoint for Render or external uptime monitors."""
     return {
         "status": "healthy",
         "service": "Beam Analysis Cloud API",
