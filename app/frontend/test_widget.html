@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beam Analysis API - Interactive Test Studio</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --accent: #f43f5e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; }
+    header { margin-bottom: 24px; text-align: center; }
+    header h1 { font-size: 1.8rem; font-weight: 700; color: var(--primary); }
+    header p { color: var(--muted); font-size: 0.95rem; margin-top: 4px; }
+    
+    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 24px; max-width: 1400px; margin: 0 auto; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    
+    .form-group { margin-bottom: 14px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+    input, select { width: 100%; background: #0f172a; border: 1px solid var(--border); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; }
+    input:focus { border-color: var(--primary); outline: none; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    button { width: 100%; background: var(--primary); color: #000; font-weight: 600; padding: 10px; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; margin-top: 10px; }
+    button:hover { background: var(--primary-hover); color: #fff; }
+
+    .canvas-container { position: relative; background: #090d16; border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 20px; text-align: center; }
+    canvas { width: 100%; height: 180px; }
+
+    .results-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+    .stat-card { background: #0f172a; border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+    .stat-val { font-size: 1.2rem; font-weight: 700; color: var(--primary); margin-top: 4px; }
+
+    .plot-container { background: #0f172a; border: 1px solid var(--border); border-radius: 8px; min-height: 400px; display: flex; align-items: center; justify-content: center; }
+    .plot-container img { max-width: 100%; border-radius: 6px; }
+    .error-box { color: var(--accent); background: rgba(244, 63, 94, 0.1); border: 1px solid var(--accent); padding: 12px; border-radius: 6px; margin-top: 12px; font-size: 0.85rem; display: none; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Beam Structural Workbench</h1>
+    <p>Interactive Canvas Preview & API Solver Studio</p>
+  </header>
+
+  <div class="grid">
+    <!-- Configuration Panel -->
+    <div class="card">
+      <h2 style="font-size: 1.1rem; margin-bottom: 16px;">Beam Configuration</h2>
+      
+      <div class="form-group">
+        <label>Total Span L (m)</label>
+        <input type="number" id="length" value="10.0" step="0.5" min="1">
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Support A (m)</label>
+          <input type="number" id="sup_a" value="0.0" step="0.5">
+        </div>
+        <div class="form-group">
+          <label>Support B (m)</label>
+          <input type="number" id="sup_b" value="8.0" step="0.5">
+        </div>
+      </div>
+
+      <h3 style="font-size: 0.9rem; color: var(--primary); margin: 16px 0 8px;">Point Load</h3>
+      <div class="row">
+        <div class="form-group">
+          <label>Mag (kN)</label>
+          <input type="number" id="p_mag" value="15.0">
+        </div>
+        <div class="form-group">
+          <label>Position (m)</label>
+          <input type="number" id="p_pos" value="4.0">
+        </div>
+      </div>
+
+      <h3 style="font-size: 0.9rem; color: var(--primary); margin: 16px 0 8px;">Uniform Distributed Load (UDL)</h3>
+      <div class="form-group">
+        <label>Magnitude (kN/m)</label>
+        <input type="number" id="udl_mag" value="5.0">
+      </div>
+      <div class="row">
+        <div class="form-group">
+          <label>Start (m)</label>
+          <input type="number" id="udl_start" value="0.0">
+        </div>
+        <div class="form-group">
+          <label>End (m)</label>
+          <input type="number" id="udl_end" value="8.0">
+        </div>
+      </div>
+
+      <h3 style="font-size: 0.9rem; color: var(--primary); margin: 16px 0 8px;">Point Moment</h3>
+      <div class="row">
+        <div class="form-group">
+          <label>Mag (kNm)</label>
+          <input type="number" id="m_mag" value="20.0">
+        </div>
+        <div class="form-group">
+          <label>Position (m)</label>
+          <input type="number" id="m_pos" value="6.0">
+        </div>
+      </div>
+
+      <button id="solve-btn">Solve & Generate Plot</button>
+      <div id="error-box" class="error-box"></div>
+    </div>
+
+    <!-- Interactive Canvas & Plot Display -->
+    <div>
+      <div class="card" style="margin-bottom: 24px;">
+        <h2 style="font-size: 1.1rem; margin-bottom: 12px;">Live Beam Geometry</h2>
+        <div class="canvas-container">
+          <canvas id="beamCanvas" width="900" height="180"></canvas>
+        </div>
+
+        <div class="results-grid">
+          <div class="stat-card">
+            <div style="font-size: 0.75rem; color: var(--muted);">Reaction R_A</div>
+            <div id="res-ra" class="stat-val">-- kN</div>
+          </div>
+          <div class="stat-card">
+            <div style="font-size: 0.75rem; color: var(--muted);">Reaction R_B</div>
+            <div id="res-rb" class="stat-val">-- kN</div>
+          </div>
+          <div class="stat-card">
+            <div style="font-size: 0.75rem; color: var(--muted);">Max Moment</div>
+            <div id="res-mmax" class="stat-val">-- kNm</div>
+          </div>
+          <div class="stat-card">
+            <div style="font-size: 0.75rem; color: var(--muted);">Max Deflection</div>
+            <div id="res-def" class="stat-val">-- mm</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size: 1.1rem; margin-bottom: 16px;">API Generated Diagrams (SFD / BMD / Deflection)</h2>
+        <div class="plot-container" id="plot-box">
+          <span style="color: var(--muted); font-size: 0.9rem;">Click "Solve & Generate Plot" to fetch API diagrams</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://127.0.0.1:8000/api/v1'; // Change to relative path if hosted on backend
+
+    // Collect elements
+    const inputs = ['length', 'sup_a', 'sup_b', 'p_mag', 'p_pos', 'udl_mag', 'udl_start', 'udl_end', 'm_mag', 'm_pos'];
+    inputs.forEach(id => document.getElementById(id).addEventListener('input', updateCanvas));
+
+    function getPayload() {
+      return {
+        length: parseFloat(document.getElementById('length').value) || 10,
+        supports: {
+          support_a: parseFloat(document.getElementById('sup_a').value) || 0,
+          support_b: parseFloat(document.getElementById('sup_b').value) || 8,
+        },
+        point_loads: [{
+          magnitude: parseFloat(document.getElementById('p_mag').value) || 0,
+          position: parseFloat(document.getElementById('p_pos').value) || 0
+        }].filter(p => p.magnitude > 0),
+        udls: [{
+          magnitude: parseFloat(document.getElementById('udl_mag').value) || 0,
+          start: parseFloat(document.getElementById('udl_start').value) || 0,
+          end: parseFloat(document.getElementById('udl_end').value) || 0
+        }].filter(u => u.magnitude > 0),
+        point_moments: [{
+          magnitude: parseFloat(document.getElementById('m_mag').value) || 0,
+          position: parseFloat(document.getElementById('m_pos').value) || 0
+        }].filter(m => m.magnitude > 0),
+        E: 210000000.0,
+        I: 0.0001
+      };
+    }
+
+    // Interactive HTML5 Canvas Renderer
+    function updateCanvas() {
+      const canvas = document.getElementById('beamCanvas');
+      const ctx = canvas.getContext('2d');
+      const p = getPayload();
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const margin = 60;
+      const width = canvas.width - 2 * margin;
+      const yBeam = 90;
+      const scale = width / p.length;
+
+      const getX = (m) => margin + m * scale;
+
+      // Draw Beam Axis
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(getX(0), yBeam);
+      ctx.lineTo(getX(p.length), yBeam);
+      ctx.stroke();
+
+      // Pin Support A (Triangle)
+      const xA = getX(p.supports.support_a);
+      ctx.fillStyle = '#f43f5e';
+      ctx.beginPath();
+      ctx.moveTo(xA, yBeam + 3);
+      ctx.lineTo(xA - 12, yBeam + 24);
+      ctx.lineTo(xA + 12, yBeam + 24);
+      ctx.closePath();
+      ctx.fill();
+
+      // Roller Support B (Triangle + Circle)
+      const xB = getX(p.supports.support_b);
+      ctx.fillStyle = '#f43f5e';
+      ctx.beginPath();
+      ctx.moveTo(xB, yBeam + 3);
+      ctx.lineTo(xB - 12, yBeam + 20);
+      ctx.lineTo(xB + 12, yBeam + 20);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(xB, yBeam + 25, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw UDLs (Hatching)
+      p.udls.forEach(u => {
+        const x1 = getX(u.start);
+        const x2 = getX(u.end);
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.1)';
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(x1, yBeam - 35, x2 - x1, 35);
+        ctx.strokeRect(x1, yBeam - 35, x2 - x1, 35);
+
+        // Arrows inside UDL
+        for (let x = x1 + 8; x < x2; x += 16) {
+          ctx.beginPath();
+          ctx.moveTo(x, yBeam - 35);
+          ctx.lineTo(x, yBeam - 4);
+          ctx.stroke();
+        }
+      });
+
+      // Draw Point Loads (Down Arrows)
+      p.point_loads.forEach(load => {
+        const x = getX(load.position);
+        ctx.strokeStyle = '#fbbf24';
+        ctx.fillStyle = '#fbbf24';
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(x, yBeam - 45);
+        ctx.lineTo(x, yBeam - 5);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x - 6, yBeam - 12);
+        ctx.lineTo(x, yBeam - 2);
+        ctx.lineTo(x + 6, yBeam - 12);
+        ctx.fill();
+      });
+
+      // Draw Point Moments (Curved Arrow)
+      p.point_moments.forEach(m => {
+        const x = getX(m.position);
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(x, yBeam, 22, -Math.PI * 0.7, Math.PI * 0.5);
+        ctx.stroke();
+      });
+    }
+
+    // Call Local API Solver
+    document.getElementById('solve-btn').addEventListener('click', async () => {
+      const errBox = document.getElementById('error-box');
+      errBox.style.display = 'none';
+
+      const payload = getPayload();
+
+      try {
+        // 1. Fetch Numerical Analysis
+        const resStats = await fetch(`${API_BASE}/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!resStats.ok) throw new Error(await resStats.text());
+        const data = await resStats.json();
+
+        document.getElementById('res-ra').innerText = `${data.reactions.R_A} kN`;
+        document.getElementById('res-rb').innerText = `${data.reactions.R_B} kN`;
+        document.getElementById('res-mmax').innerText = `${data.critical_values.max_bending_moment} kNm`;
+        document.getElementById('res-def').innerText = `${data.critical_values.max_deflection_mm} mm`;
+
+        // 2. Fetch Plot PNG
+        const resPlot = await fetch(`${API_BASE}/analyze/plot`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const blob = await resPlot.blob();
+        const imgUrl = URL.createObjectURL(blob);
+        document.getElementById('plot-box').innerHTML = `<img src="${imgUrl}" alt="SFD BMD Plot">`;
+
+      } catch (err) {
+        errBox.innerText = `Error: ${err.message}`;
+        errBox.style.display = 'block';
+      }
+    });
+
+    // Initial render
+    updateCanvas();
+  </script>
+</body>
+</html>
